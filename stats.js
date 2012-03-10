@@ -1,8 +1,9 @@
 var dgram  = require('dgram')
-  , util    = require('util')
+  , util   = require('util')
   , net    = require('net')
   , config = require('./config')
   , fs     = require('fs')
+  ;
 
 var keyCounter = {};
 var counters = {};
@@ -11,31 +12,30 @@ var debugInt, flushInt, keyFlushInt, server, mgmtServer;
 var startup_time = Math.round(new Date().getTime() / 1000);
 
 var stats = {
-  graphite: {
-    last_flush: startup_time,
-    last_exception: startup_time
+  graphite : {
+    last_flush : startup_time,
+    last_exception : startup_time
   },
   messages: {
-    last_msg_seen: startup_time,
-    bad_lines_seen: 0,
+    last_msg_seen : startup_time,
+    bad_lines_seen : 0
   }
 };
 
 config.configFile(process.argv[2], function (config, oldConfig) {
-  if (! config.debug && debugInt) {
-    clearInterval(debugInt); 
+  if (!config.debug && debugInt) {
+    clearInterval(debugInt);
     debugInt = false;
   }
 
   if (config.debug) {
     if (debugInt !== undefined) { clearInterval(debugInt); }
-    debugInt = setInterval(function () { 
+    debugInt = setInterval(function () {
       util.log("Counters:\n" + util.inspect(counters) + "\nTimers:\n" + util.inspect(timers));
     }, config.debugInterval || 10000);
   }
 
   if (server === undefined) {
-
     // key counting
     var keyFlushInterval = Number((config.keyFlush && config.keyFlush.interval) || 0);
 
@@ -43,54 +43,59 @@ config.configFile(process.argv[2], function (config, oldConfig) {
       if (config.dumpMessages) { util.log(msg.toString()); }
       var bits = msg.toString().split(':');
       var key = bits.shift()
-                    .replace(/\s+/g, '_')
-                    .replace(/\//g, '-')
-                    .replace(/[^a-zA-Z_\-0-9\.]/g, '');
+        .replace(/\s+/g, '_')
+        .replace(/\//g, '-')
+        .replace(/[^a-zA-Z_\-0-9\.]/g, '');
 
       if (keyFlushInterval > 0) {
-        if (! keyCounter[key]) {
+        if (!keyCounter[key]) {
           keyCounter[key] = 0;
         }
         keyCounter[key] += 1;
       }
 
-      if (bits.length == 0) {
+      if (bits.length === 0) {
         bits.push("1");
       }
 
       for (var i = 0; i < bits.length; i++) {
         var sampleRate = 1;
         var fields = bits[i].split("|");
+
         if (fields[1] === undefined) {
-            util.log('Bad line: ' + fields);
-            stats['messages']['bad_lines_seen']++;
-            continue;
+          util.log('Bad line: ' + fields);
+          stats.messages.bad_lines_seen++;
+          continue;
         }
+
         if (fields[1].trim() == "ms") {
           if (! timers[key]) {
             timers[key] = [];
           }
           timers[key].push(Number(fields[0] || 0));
-        } else {
+        }
+        else {
           if (fields[2] && fields[2].match(/^@([\d\.]+)/)) {
             sampleRate = Number(fields[2].match(/^@([\d\.]+)/)[1]);
           }
-          if (! counters[key]) {
+
+          if (!counters[key]) {
             counters[key] = 0;
           }
           counters[key] += Number(fields[0] || 1) * (1 / sampleRate);
         }
       }
 
-      stats['messages']['last_msg_seen'] = Math.round(new Date().getTime() / 1000);
+      stats.messages.last_msg_seen = Math.round(new Date().getTime() / 1000);
     });
 
-    mgmtServer = net.createServer(function(stream) {
+    mgmtServer = net.createServer(function (stream) {
       stream.setEncoding('ascii');
 
-      stream.on('data', function(data) {
+      stream.on('data', function (data) {
         var cmdline = data.trim().split(" ");
         var cmd = cmdline.shift();
+        var index;
 
         switch(cmd) {
           case "help":
@@ -103,8 +108,8 @@ config.configFile(process.argv[2], function (config, oldConfig) {
 
             stream.write("uptime: " + uptime + "\n");
 
-            for (group in stats) {
-              for (metric in stats[group]) {
+            for (var group in stats) {
+              for (var metric in stats[group]) {
                 var val;
 
                 if (metric.match("^last_")) {
@@ -154,7 +159,6 @@ config.configFile(process.argv[2], function (config, oldConfig) {
             stream.write("ERROR\n");
             break;
         }
-
       });
     });
 
@@ -187,13 +191,16 @@ config.configFile(process.argv[2], function (config, oldConfig) {
         numStats += 1;
       }
 
+      function criterion(a,b) {
+        return a - b;
+      }
+
       for (key in timers) {
         if (timers[key].length > 0) {
-          var values = timers[key].sort(function (a,b) { return a-b; });
+          var values = timers[key].sort(criterion);
           var count = values.length;
           var min = values[0];
           var max = values[count - 1];
-
           var mean = min;
           var maxAtThreshold = max;
 
@@ -236,25 +243,25 @@ config.configFile(process.argv[2], function (config, oldConfig) {
       }
 
       statString += 'statsd.numStats ' + numStats + ' ' + ts + "\n";
-      
+
       if (config.graphiteHost) {
         try {
           var graphite = net.createConnection(config.graphitePort, config.graphiteHost);
-          graphite.addListener('error', function(connectionException){
+          graphite.addListener('error', function (connectionException){
             if (config.debug) {
               util.log(connectionException);
             }
           });
-          graphite.on('connect', function() {
+          graphite.on('connect', function () {
             this.write(statString);
             this.end();
-            stats['graphite']['last_flush'] = Math.round(new Date().getTime() / 1000);
+            stats.graphite.last_flush = Math.round(new Date().getTime() / 1000);
           });
-        } catch(e){
+        } catch (e) {
           if (config.debug) {
             util.log(e);
           }
-          stats['graphite']['last_exception'] = Math.round(new Date().getTime() / 1000);
+          stats.graphite.last_exception = Math.round(new Date().getTime() / 1000);
         }
       }
 
@@ -272,7 +279,7 @@ config.configFile(process.argv[2], function (config, oldConfig) {
           sortedKeys.push([key, keyCounter[key]]);
         }
 
-        sortedKeys.sort(function(a, b) { return b[1] - a[1]; });
+        sortedKeys.sort(function (a, b) { return b[1] - a[1]; });
 
         var logMessage = "";
         var timeString = (new Date()) + "";
